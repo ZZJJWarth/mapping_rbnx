@@ -21,6 +21,12 @@
 set -eo pipefail
 
 source /opt/ros/humble/setup.bash
+if [ -f /opt/zc_ws/install/setup.bash ]; then
+    source /opt/zc_ws/install/setup.bash
+fi
+if [ -f /opt/rtabmap_ws/install/setup.bash ]; then
+    source /opt/rtabmap_ws/install/setup.bash
+fi
 
 cd /mapping
 

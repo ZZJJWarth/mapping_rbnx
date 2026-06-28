@@ -7,8 +7,9 @@
 # whatever sim/robot container is publishing the sensor topics.
 #
 # Algorithms shipped (selected via manifest config.algo):
-#   rtabmap   — default. 2D lidar + RGBD fusion. Fully apt-installable
-#               (ros-humble-rtabmap-ros), no extra colcon build.
+#   rtabmap   — default. 2D lidar + RGBD fusion. Built from the pinned
+#               third_party/rtabmap + third_party/rtabmap_ros submodules
+#               so local transport changes are actually used at runtime.
 #   dlio      — Direct LiDAR-Inertial Odometry. Real-robot 3D Livox
 #               path; expects the dlio package mounted at /ws/install
 #               (separate slam_alt_ws colcon build), so this image
@@ -46,20 +47,67 @@ ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
     HF_ENDPOINT=https://hf-mirror.com
 
 # Runtime deps:
-#   rtabmap-ros: SLAM core + rtabmap_viz GUI for dev inspection
+#   rtabmap source deps: SLAM core + rtabmap_viz GUI for dev inspection
 #   tf2 / tf-transformations: pose lookups in atlas_bridge
 #   pointcloud_to_laserscan: depth → 2D scan adapter (used by dlio
 #     fallback paths and any future depth-only deploys)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        python3-colcon-common-extensions \
         python3-pip \
         python3-numpy \
         python3-yaml \
-        ros-humble-rtabmap-ros \
+        libopencv-dev \
+        libpcl-dev \
+        libsqlite3-dev \
+        libproj-dev \
+        liboctomap-dev \
+        zlib1g-dev \
+        qtbase5-dev \
+        libqt5svg5-dev \
+        ros-humble-apriltag-msgs \
+        ros-humble-aruco-msgs \
+        ros-humble-aruco-opencv-msgs \
+        ros-humble-cv-bridge \
+        ros-humble-diagnostic-updater \
+        ros-humble-grid-map-ros \
+        ros-humble-iceoryx-posh \
+        ros-humble-image-geometry \
+        ros-humble-image-transport \
+        ros-humble-laser-geometry \
+        ros-humble-message-filters \
+        ros-humble-nav2-msgs \
+        ros-humble-octomap-msgs \
+        ros-humble-pcl-conversions \
+        ros-humble-pcl-ros \
+        ros-humble-qt-gui-cpp \
+        ros-humble-rclcpp-components \
+        ros-humble-tf2-eigen \
+        ros-humble-tf2-geometry-msgs \
         ros-humble-tf2-ros \
         ros-humble-tf-transformations \
         ros-humble-pointcloud-to-laserscan \
  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/zc_ws
+COPY third_party/cpp_pubsub src/cpp_pubsub
+RUN . /opt/ros/humble/setup.sh \
+ && colcon build --event-handlers console_direct+ \
+      --packages-select cpp_pubsub \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DROBONIX_ZC_BUILD_EXAMPLES=OFF \
+ && rm -rf build log
+
+WORKDIR /opt/rtabmap_ws
+COPY third_party/rtabmap src/rtabmap
+COPY third_party/rtabmap_ros src/rtabmap_ros
+RUN . /opt/ros/humble/setup.sh \
+ && . /opt/zc_ws/install/setup.sh \
+ && colcon build --event-handlers console_direct+ \
+      --packages-up-to rtabmap_slam rtabmap_odom rtabmap_viz \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_APP=OFF -DBUILD_TOOLS=OFF -DBUILD_EXAMPLES=OFF \
+ && rm -rf build log
 
 RUN pip install --no-cache-dir \
         grpcio>=1.60.0 \
@@ -69,8 +117,8 @@ RUN pip install --no-cache-dir \
         mcp>=1.28.1
 
 WORKDIR /mapping
-COPY entrypoint.sh /entrypoint.sh
-COPY no_shm_profile.xml /etc/fastrtps_no_shm.xml
+COPY docker/entrypoint.sh /entrypoint.sh
+COPY docker/no_shm_profile.xml /etc/fastrtps_no_shm.xml
 RUN chmod +x /entrypoint.sh
 
 # Force FastRTPS to skip SHM transport — UDP-only is the only path

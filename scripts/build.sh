@@ -69,7 +69,7 @@ case "$TARGET" in
             echo "[build] image $IMG present; rebuilding incrementally"
         fi
         echo "[build] docker build -f $DF -t $IMG"
-        docker build "${DOCKER_BUILD_FLAGS[@]}" -f "$DF" -t "$IMG" docker/
+        docker build "${DOCKER_BUILD_FLAGS[@]}" -f "$DF" -t "$IMG" .
         ;;
 
     jetson-native)

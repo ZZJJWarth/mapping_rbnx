@@ -92,6 +92,7 @@ def _make_nodes(context, *args, **kwargs):
     have_rgb = bool(rgb_topic) and rgb_topic != _NONE
     have_depth = bool(depth_topic) and depth_topic != _NONE
     have_rgbd = have_rgb and have_depth
+    use_rgb_zc = have_rgbd and os.environ.get("ROBONIX_MAPPING_RGB_ZC", "1").lower() not in ("0", "false", "no")
     have_odom = bool(odom_topic) and odom_topic != _NONE
 
     if not (have_scan or have_scan_cloud or have_rgbd):
@@ -131,6 +132,11 @@ def _make_nodes(context, *args, **kwargs):
         "subscribe_rgbd": False,
         "subscribe_rgb": have_rgbd,
         "subscribe_depth": have_rgbd,
+        "subscribe_rgb_zc": use_rgb_zc,
+        "rgb_zc_topic": os.environ.get("ROBONIX_MAPPING_RGB_ZC_TOPIC", "/camera/rgb_zc"),
+        "rgb_zc_shm_name": os.environ.get("ROBONIX_MAPPING_RGB_ZC_SHM", "robonix_zc_rgb"),
+        "rgb_zc_shm_size": int(os.environ.get("ROBONIX_MAPPING_RGB_ZC_SHM_SIZE", "67108864")),
+        "rgb_zc_stamp_tolerance": float(os.environ.get("ROBONIX_MAPPING_RGB_ZC_STAMP_TOLERANCE", "0.05")),
         "subscribe_odom_info": False,
         "approx_sync": True,
         "queue_size": 30,
@@ -237,7 +243,8 @@ def _make_nodes(context, *args, **kwargs):
         rtabmap_args = []
     print(f"[rtabmap.launch] map_mode={map_mode or 'ephemeral'} "
           f"db={database_path or '(default temp)'} "
-          f"localization={localization} delete_db={bool(rtabmap_args)}")
+          f"localization={localization} delete_db={bool(rtabmap_args)} "
+          f"rgb_zc={use_rgb_zc}")
 
     rtabmap_node = Node(
         package="rtabmap_slam",
