@@ -1,3 +1,11 @@
 [submodule "third_party/FASTLIO2_ROS2"]
 	path = third_party/FASTLIO2_ROS2
 	url = https://github.com/enkerewpo/FASTLIO2_ROS2.git
+[submodule "third_party/rtabmap_ros"]
+	path = third_party/rtabmap_ros
+	url = https://github.com/ZZJJWarth/rtabmap_ros.git
+	branch = zc_immigrate
+[submodule "third_party/rtabmap"]
+	path = third_party/rtabmap
+	url = https://github.com/ZZJJWarth/rtabmap.git
+	branch = zc_immigrate
