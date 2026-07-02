@@ -17,7 +17,7 @@ set -eo pipefail
 PKG="${RBNX_PACKAGE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$PKG"
 
-# ── ROS 2 (host) — includes rtabmap_slam / _odom / _viz from apt ───────
+# ── ROS 2 host base + package overlay ─────────────────────────────────
 if [[ -z "${ROS_DISTRO:-}" || -z "${AMENT_PREFIX_PATH:-}" ]] || ! command -v ros2 >/dev/null 2>&1; then
     if [[ -f /opt/ros/humble/setup.bash ]]; then
         set +u; source /opt/ros/humble/setup.bash; set -u
@@ -27,11 +27,19 @@ if [[ -z "${ROS_DISTRO:-}" || -z "${AMENT_PREFIX_PATH:-}" ]] || ! command -v ros
         exit 2
     fi
 fi
-# Fail loud if rtabmap isn't actually installed natively.
+NATIVE_OVERLAY="$PKG/rbnx-build/native_ws/install/setup.bash"
+if [[ -f "$NATIVE_OVERLAY" ]]; then
+    set +u; source "$NATIVE_OVERLAY"; set -u
+else
+    echo "[mapping-native] ERR: native overlay missing: $NATIVE_OVERLAY" >&2
+    echo "[mapping-native]      run \`RBNX_BUILD_TARGET=jetson-native rbnx build\` first" >&2
+    exit 2
+fi
+
+# Fail loud if the overlay did not provide rtabmap_slam.
 if ! ros2 pkg prefix rtabmap_slam >/dev/null 2>&1; then
-    echo "[mapping-native] ERR: rtabmap_slam not found on the host ROS install." >&2
-    echo "[mapping-native]      sudo apt install ros-humble-rtabmap-ros" >&2
-    echo "[mapping-native]      (or ROBONIX_MAPPING_FORCE=docker)" >&2
+    echo "[mapping-native] ERR: rtabmap_slam not found after sourcing native overlay." >&2
+    echo "[mapping-native]      rebuild $PKG/rbnx-build/native_ws" >&2
     exit 2
 fi
 

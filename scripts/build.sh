@@ -8,8 +8,9 @@
 # below plus its Dockerfile / native step — nothing else changes.
 #   x86-docker     x86_64 + docker, ROS2 in image (docker/Dockerfile)   [default]
 #   jetson-docker  arm64 Jetson + docker, L4T base (docker/Dockerfile.jetson)
-#   jetson-native  arm64 Jetson + host ROS2 — no docker; ensure
-#                  ros-humble-rtabmap-ros is apt-installed on the host.
+#   jetson-native  arm64 Jetson + host ROS2 — no docker; builds the vendored
+#                  cpp_pubsub + rtabmap + rtabmap_ros overlay under
+#                  rbnx-build/native_ws so ZC patches are used at runtime.
 #
 # RBNX_BUILD_CLEAN=1     nuke rbnx-build/ and rebuild without docker cache.
 # RBNX_BUILD_VARIANT=fastlio2_full  (x86-docker only) heavy FASTLIO2 image.
@@ -22,7 +23,13 @@ BUILD="rbnx-build"
 CLEAN="${RBNX_BUILD_CLEAN:-}"
 VARIANT="${RBNX_BUILD_VARIANT:-light}"
 IMG="${ROBONIX_MAPPING_IMAGE:-robonix-mapping}"
-TARGET="${RBNX_BUILD_TARGET:-x86-docker}"
+if [[ -n "${RBNX_BUILD_TARGET:-}" ]]; then
+    TARGET="$RBNX_BUILD_TARGET"
+elif [[ "$(uname -m)" == "aarch64" ]]; then
+    TARGET="jetson-native"
+else
+    TARGET="x86-docker"
+fi
 
 if [[ "$CLEAN" == "1" ]]; then
     echo "[build] clean: removing $BUILD"
@@ -78,23 +85,52 @@ case "$TARGET" in
         ;;
 
     jetson-native)
-        # No docker: rtabmap runs as a host process (start_native.sh). The
-        # only build-time requirement is that the host has ROS2 Humble +
-        # rtabmap. We don't apt-install for the operator (needs sudo and a
-        # specific ROS apt setup) — we verify and tell them what's missing.
-        echo "[build] native target — verifying host ROS2 + rtabmap"
+        # No docker: build a host overlay from the vendored sources, then
+        # start_native.sh sources it before launching rtabmap. This is required
+        # for Robonix ZC because apt's ros-humble-rtabmap-ros does not contain
+        # our rtabmap_sync zero-copy subscriber patches.
+        echo "[build] native target — building vendored ROS2 overlay"
         missing=0
+        if [[ -z "${ROS_DISTRO:-}" || -z "${AMENT_PREFIX_PATH:-}" ]] || ! command -v ros2 >/dev/null 2>&1; then
+            if [[ -f /opt/ros/humble/setup.bash ]]; then
+                set +u; source /opt/ros/humble/setup.bash; set -u
+            fi
+        fi
         if ! command -v ros2 >/dev/null 2>&1; then
-            echo "[build] ERROR: ros2 not on PATH — source /opt/ros/humble/setup.bash" >&2
+            echo "[build] ERROR: ros2 not on PATH and /opt/ros/humble/setup.bash was not usable" >&2
             missing=1
         fi
-        if ! ros2 pkg prefix rtabmap_slam >/dev/null 2>&1; then
-            echo "[build] ERROR: rtabmap not installed. On the Jetson host run:" >&2
-            echo "[build]   sudo apt install ros-humble-rtabmap-ros" >&2
+        if ! command -v colcon >/dev/null 2>&1; then
+            echo "[build] ERROR: colcon not on PATH. Install python3-colcon-common-extensions." >&2
             missing=1
         fi
         [[ "$missing" == "1" ]] && exit 1
-        echo "[build] host rtabmap OK ($(ros2 pkg prefix rtabmap_slam))"
+
+        if [[ -f .gitmodules ]]; then
+            echo "[build] syncing git submodules for native build"
+            git submodule sync --recursive
+            git submodule update --init --recursive
+        fi
+
+        NATIVE_WS="$PKG/$BUILD/native_ws"
+        mkdir -p "$NATIVE_WS/src"
+        ln -sfn "$PKG/third_party/cpp_pubsub" "$NATIVE_WS/src/cpp_pubsub"
+        ln -sfn "$PKG/third_party/rtabmap" "$NATIVE_WS/src/rtabmap"
+        ln -sfn "$PKG/third_party/rtabmap_ros" "$NATIVE_WS/src/rtabmap_ros"
+
+        echo "[build] colcon build native overlay -> $NATIVE_WS/install"
+        (
+            cd "$NATIVE_WS"
+            colcon build --event-handlers console_direct+ \
+                --packages-up-to cpp_pubsub rtabmap_slam rtabmap_odom rtabmap_viz \
+                --cmake-args \
+                    -DCMAKE_BUILD_TYPE=Release \
+                    -DROBONIX_ZC_BUILD_EXAMPLES=OFF \
+                    -DBUILD_APP=OFF \
+                    -DBUILD_TOOLS=OFF \
+                    -DBUILD_EXAMPLES=OFF
+        )
+        echo "[build] native overlay OK: $NATIVE_WS/install/setup.bash"
         ;;
 
     *)
