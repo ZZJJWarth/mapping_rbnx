@@ -68,6 +68,11 @@ case "$TARGET" in
         if [[ "$CLEAN" != "1" ]] && docker image inspect "$IMG" >/dev/null 2>&1; then
             echo "[build] image $IMG present; rebuilding incrementally"
         fi
+        if [[ -f .gitmodules ]]; then
+            echo "[build] syncing git submodules for docker build context"
+            git submodule sync --recursive
+            git submodule update --init --recursive
+        fi
         echo "[build] docker build -f $DF -t $IMG"
         docker build "${DOCKER_BUILD_FLAGS[@]}" -f "$DF" -t "$IMG" .
         ;;
