@@ -71,6 +71,11 @@ def generate_launch_description():
 
 
 def _make_nodes(context, *args, **kwargs):
+    """Create RTAB-Map launch nodes from resolved sensor topics and runtime mode.
+
+    Side effects are limited to reading environment toggles and printing the
+    selected map/ZC mode; apt RTAB-Map builds omit Robonix-only ZC parameters.
+    """
     use_sim_time_str = LaunchConfiguration("use_sim_time").perform(context)
     scan_topic = LaunchConfiguration("scan_topic").perform(context)
     scan_cloud_topic = LaunchConfiguration("scan_cloud_topic").perform(context)
@@ -92,9 +97,11 @@ def _make_nodes(context, *args, **kwargs):
     have_rgb = bool(rgb_topic) and rgb_topic != _NONE
     have_depth = bool(depth_topic) and depth_topic != _NONE
     have_rgbd = have_rgb and have_depth
-    use_rgb_zc = have_rgbd and os.environ.get("ROBONIX_MAPPING_RGB_ZC", "1").lower() not in ("0", "false", "no")
+    rtabmap_build = os.environ.get("ROBONIX_MAPPING_RTABMAP_BUILD", "source").lower()
+    zc_supported = rtabmap_build != "apt"
+    use_rgb_zc = zc_supported and have_rgbd and os.environ.get("ROBONIX_MAPPING_RGB_ZC", "1").lower() not in ("0", "false", "no")
     use_depth_zc = use_rgb_zc and os.environ.get("ROBONIX_MAPPING_DEPTH_ZC", "1").lower() not in ("0", "false", "no")
-    use_scan_cloud_zc = have_scan_cloud and os.environ.get("ROBONIX_MAPPING_SCAN_CLOUD_ZC", "1").lower() not in ("0", "false", "no")
+    use_scan_cloud_zc = zc_supported and have_scan_cloud and os.environ.get("ROBONIX_MAPPING_SCAN_CLOUD_ZC", "1").lower() not in ("0", "false", "no")
     have_odom = bool(odom_topic) and odom_topic != _NONE
 
     if not (have_scan or have_scan_cloud or have_rgbd):
@@ -134,15 +141,6 @@ def _make_nodes(context, *args, **kwargs):
         "subscribe_rgbd": False,
         "subscribe_rgb": have_rgbd,
         "subscribe_depth": have_rgbd,
-        "subscribe_rgb_zc": use_rgb_zc,
-        "subscribe_depth_zc": use_depth_zc,
-        "subscribe_scan_cloud_zc": use_scan_cloud_zc,
-        "rgb_zc_topic": os.environ.get("ROBONIX_MAPPING_RGB_ZC_TOPIC", "/camera/rgb_zc"),
-        "depth_zc_topic": os.environ.get("ROBONIX_MAPPING_DEPTH_ZC_TOPIC", "/camera/depth_zc"),
-        "scan_cloud_zc_topic": os.environ.get("ROBONIX_MAPPING_SCAN_CLOUD_ZC_TOPIC", "/scanner/cloud_zc"),
-        "rgb_zc_shm_name": os.environ.get("ROBONIX_MAPPING_RGB_ZC_SHM", "robonix_zc_camera"),
-        "rgb_zc_shm_size": int(os.environ.get("ROBONIX_MAPPING_RGB_ZC_SHM_SIZE", "67108864")),
-        "rgb_zc_stamp_tolerance": float(os.environ.get("ROBONIX_MAPPING_RGB_ZC_STAMP_TOLERANCE", "0.05")),
         "subscribe_odom_info": False,
         "approx_sync": True,
         "queue_size": 30,
@@ -212,6 +210,18 @@ def _make_nodes(context, *args, **kwargs):
         "Icp/MaxTranslation": "0.5",
         "Icp/MaxRotation": "0.78",  # ~45°
     }
+    if zc_supported:
+        rtabmap_params.update({
+            "subscribe_rgb_zc": use_rgb_zc,
+            "subscribe_depth_zc": use_depth_zc,
+            "subscribe_scan_cloud_zc": use_scan_cloud_zc,
+            "rgb_zc_topic": os.environ.get("ROBONIX_MAPPING_RGB_ZC_TOPIC", "/camera/rgb_zc"),
+            "depth_zc_topic": os.environ.get("ROBONIX_MAPPING_DEPTH_ZC_TOPIC", "/camera/depth_zc"),
+            "scan_cloud_zc_topic": os.environ.get("ROBONIX_MAPPING_SCAN_CLOUD_ZC_TOPIC", "/scanner/cloud_zc"),
+            "rgb_zc_shm_name": os.environ.get("ROBONIX_MAPPING_RGB_ZC_SHM", "robonix_zc_camera"),
+            "rgb_zc_shm_size": int(os.environ.get("ROBONIX_MAPPING_RGB_ZC_SHM_SIZE", "67108864")),
+            "rgb_zc_stamp_tolerance": float(os.environ.get("ROBONIX_MAPPING_RGB_ZC_STAMP_TOLERANCE", "0.05")),
+        })
 
     rtabmap_remappings = [
         # rviz "2D Pose Estimate" → /initialpose: rtabmap defaults to
@@ -250,7 +260,7 @@ def _make_nodes(context, *args, **kwargs):
     print(f"[rtabmap.launch] map_mode={map_mode or 'ephemeral'} "
           f"db={database_path or '(default temp)'} "
           f"localization={localization} delete_db={bool(rtabmap_args)} "
-          f"rgb_zc={use_rgb_zc}")
+          f"rtabmap_build={rtabmap_build} rgb_zc={use_rgb_zc}")
 
     rtabmap_node = Node(
         package="rtabmap_slam",

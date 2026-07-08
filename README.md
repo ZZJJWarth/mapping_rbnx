@@ -67,6 +67,25 @@ One package, three targets (selected by the deploy `manifest:` field — see
 Add a target by adding a `package_manifest.<target>.yaml` plus a case branch
 in `scripts/build.sh` — the rest of the package is unchanged.
 
+## RTAB-Map build source
+
+`RBNX_RTABMAP_BUILD` selects where the `rtabmap` ROS packages come from:
+
+| value | behavior |
+|---|---|
+| `source` *(default)* | build vendored `third_party/rtabmap` + `third_party/rtabmap_ros`; includes Robonix zero-copy subscriber patches |
+| `apt` | install/use `ros-humble-rtabmap-ros`; faster baseline build without Robonix zero-copy rtabmap patches |
+
+For Docker:
+
+```bash
+RBNX_RTABMAP_BUILD=apt rbnx build -f robonix_manifest.yaml
+```
+
+For native Jetson, `apt` expects `ros-humble-rtabmap-ros` to already be
+installed on the host. The `apt` path defaults `ROBONIX_MAPPING_*_ZC=0` so the
+launch does not pass zero-copy-only subscriptions to the stock packages.
+
 ## Saving & re-using a map
 
 Set `map_id` to persist. A named map lives under `{MAPPING_MAPS_DIR}/{map_id}/`

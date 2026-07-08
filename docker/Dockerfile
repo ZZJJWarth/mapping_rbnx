@@ -7,9 +7,9 @@
 # whatever sim/robot container is publishing the sensor topics.
 #
 # Algorithms shipped (selected via manifest config.algo):
-#   rtabmap   — default. 2D lidar + RGBD fusion. Built from the pinned
-#               third_party/rtabmap + third_party/rtabmap_ros submodules
-#               so local transport changes are actually used at runtime.
+#   rtabmap   — default. 2D lidar + RGBD fusion. Build target selects
+#               rtabmap-source (vendored sources + ZC patches) or
+#               rtabmap-apt (ros-humble-rtabmap-ros baseline).
 #   dlio      — Direct LiDAR-Inertial Odometry. Real-robot 3D Livox
 #               path; expects the dlio package mounted at /ws/install
 #               (separate slam_alt_ws colcon build), so this image
@@ -20,7 +20,7 @@
 # beat them in head-to-head tests on webots tiago (curve-motion
 # stability, RGBD fusion, loop closure).
 ARG ROS_BASE_IMAGE=robonix-ros:humble-ros-base
-FROM ${ROS_BASE_IMAGE}
+FROM ${ROS_BASE_IMAGE} AS base
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -48,18 +48,61 @@ ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
     HF_ENDPOINT=https://hf-mirror.com
 
 # Runtime deps:
-#   rtabmap source deps: SLAM core + rtabmap_viz GUI for dev inspection
 #   tf2 / tf-transformations: pose lookups in atlas_bridge
 #   pointcloud_to_laserscan: depth → 2D scan adapter (used by dlio
 #     fallback paths and any future depth-only deploys)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        build-essential \
-        cmake \
-        python3-colcon-common-extensions \
         python3-pip \
         python3-numpy \
         python3-yaml \
+        ros-humble-tf2-ros \
+        ros-humble-tf-transformations \
+        ros-humble-pointcloud-to-laserscan \
+        ros-humble-rmw-zenoh-cpp \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+        grpcio>=1.60.0 \
+        protobuf>=4.25.0 \
+        pyyaml>=6.0 \
+        numpy \
+        pillow \
+        mcp>=1.28.1
+
+WORKDIR /mapping
+COPY docker/entrypoint.sh /entrypoint.sh
+COPY docker/no_shm_profile.xml /etc/fastrtps_no_shm.xml
+RUN chmod +x /entrypoint.sh
+
+# Left for operators who explicitly override RMW back to FastRTPS.
+ENV FASTRTPS_DEFAULT_PROFILES_FILE=/etc/fastrtps_no_shm.xml
+
+ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
+
+ENTRYPOINT ["/entrypoint.sh"]
+
+# ── RTAB-Map from apt: quick baseline, no Robonix ZC rtabmap patches ─────────
+FROM base AS rtabmap-apt
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        ros-humble-rtabmap-ros \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV ROBONIX_MAPPING_RTABMAP_BUILD=apt \
+    ROBONIX_MAPPING_RGB_ZC=0 \
+    ROBONIX_MAPPING_DEPTH_ZC=0 \
+    ROBONIX_MAPPING_SCAN_CLOUD_ZC=0
+
+# ── RTAB-Map from source: vendored overlay with Robonix ZC patches ───────────
+FROM base AS rtabmap-source
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        python3-colcon-common-extensions \
         libopencv-dev \
         libpcl-dev \
         libsqlite3-dev \
@@ -87,10 +130,6 @@ RUN apt-get update \
         ros-humble-rclcpp-components \
         ros-humble-tf2-eigen \
         ros-humble-tf2-geometry-msgs \
-        ros-humble-tf2-ros \
-        ros-humble-tf-transformations \
-        ros-humble-pointcloud-to-laserscan \
-        ros-humble-rmw-zenoh-cpp \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/zc_ws
@@ -111,22 +150,6 @@ RUN . /opt/ros/humble/setup.sh \
       --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_APP=OFF -DBUILD_TOOLS=OFF -DBUILD_EXAMPLES=OFF \
  && rm -rf build log
 
-RUN pip install --no-cache-dir \
-        grpcio>=1.60.0 \
-        protobuf>=4.25.0 \
-        pyyaml>=6.0 \
-        numpy \
-        pillow \
-        mcp>=1.28.1
+ENV ROBONIX_MAPPING_RTABMAP_BUILD=source
 
 WORKDIR /mapping
-COPY docker/entrypoint.sh /entrypoint.sh
-COPY docker/no_shm_profile.xml /etc/fastrtps_no_shm.xml
-RUN chmod +x /entrypoint.sh
-
-# Left for operators who explicitly override RMW back to FastRTPS.
-ENV FASTRTPS_DEFAULT_PROFILES_FILE=/etc/fastrtps_no_shm.xml
-
-ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
-
-ENTRYPOINT ["/entrypoint.sh"]

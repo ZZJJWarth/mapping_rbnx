@@ -14,6 +14,7 @@
 #
 # RBNX_BUILD_CLEAN=1     nuke rbnx-build/ and rebuild without docker cache.
 # RBNX_BUILD_VARIANT=fastlio2_full  (x86-docker only) heavy FASTLIO2 image.
+# RBNX_RTABMAP_BUILD=source|apt     source keeps Robonix ZC patches; apt is baseline.
 set -euo pipefail
 
 PKG="${RBNX_PACKAGE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -25,6 +26,7 @@ BUILD="rbnx-build"
 CLEAN="${RBNX_BUILD_CLEAN:-}"
 VARIANT="${RBNX_BUILD_VARIANT:-light}"
 IMG="${ROBONIX_MAPPING_IMAGE:-robonix-mapping}"
+RTABMAP_BUILD="${RBNX_RTABMAP_BUILD:-source}"
 if [[ -n "${RBNX_BUILD_TARGET:-}" ]]; then
     TARGET="$RBNX_BUILD_TARGET"
 elif [[ "$(uname -m)" == "aarch64" ]]; then
@@ -35,6 +37,10 @@ fi
 ROS_BASE_IMAGE="${ROBONIX_MAPPING_ROS_BASE_IMAGE:-robonix-ros:humble-ros-base}"
 UPSTREAM_ROS_BASE_IMAGE="ros:humble-ros-base"
 JETSON_ROS_BASE_IMAGE="${ROBONIX_MAPPING_JETSON_ROS_BASE_IMAGE:-dustynv/ros:humble-ros-base-l4t-r36.4.0}"
+case "$RTABMAP_BUILD" in
+    source|apt) ;;
+    *) echo "[build] unknown RBNX_RTABMAP_BUILD: $RTABMAP_BUILD (source|apt)" >&2; exit 2 ;;
+esac
 
 if [[ "$CLEAN" == "1" ]]; then
     echo "[build] clean: removing $BUILD"
@@ -57,7 +63,7 @@ else
     echo "[build]   install robonix-cli + run \`rbnx setup\` once from the robonix source root"
 fi
 
-echo "[build] target=$TARGET"
+echo "[build] target=$TARGET rtabmap=$RTABMAP_BUILD"
 
 # ── 2. Per-target build ─────────────────────────────────────────────────────
 case "$TARGET" in
@@ -75,7 +81,10 @@ case "$TARGET" in
             robonix_ensure_local_base_image "$ROS_BASE_IMAGE" "$UPSTREAM_ROS_BASE_IMAGE"
             DOCKER_BUILD_FLAGS+=(--build-arg "ROS_BASE_IMAGE=${ROS_BASE_IMAGE}")
             case "$VARIANT" in
-                light)         DF=docker/Dockerfile ;;
+                light)
+                    DF=docker/Dockerfile
+                    DOCKER_BUILD_FLAGS+=(--target "rtabmap-${RTABMAP_BUILD}")
+                    ;;
                 fastlio2_full) DF=docker/Dockerfile.fastlio2_full ;;
                 *) echo "[build] unknown RBNX_BUILD_VARIANT: $VARIANT (light|fastlio2_full)" >&2; exit 2 ;;
             esac
@@ -83,7 +92,7 @@ case "$TARGET" in
         if [[ "$CLEAN" != "1" ]] && docker image inspect "$IMG" >/dev/null 2>&1; then
             echo "[build] image $IMG present; rebuilding incrementally"
         fi
-        if [[ -f .gitmodules ]]; then
+        if [[ -f .gitmodules && ( "$TARGET" != "x86-docker" || "$VARIANT" != "light" || "$RTABMAP_BUILD" != "apt" ) ]]; then
             echo "[build] syncing git submodules for docker build context"
             git submodule sync --recursive
             git submodule update --init --recursive
@@ -93,11 +102,8 @@ case "$TARGET" in
         ;;
 
     jetson-native)
-        # No docker: build a host overlay from the vendored sources, then
-        # start_native.sh sources it before launching rtabmap. This is required
-        # for Robonix ZC because apt's ros-humble-rtabmap-ros does not contain
-        # our rtabmap_sync zero-copy subscriber patches.
-        echo "[build] native target — building vendored ROS2 overlay"
+        echo "[build] native target — rtabmap=$RTABMAP_BUILD"
+        printf '%s\n' "$RTABMAP_BUILD" > "$BUILD/rtabmap_build"
         missing=0
         if [[ -z "${ROS_DISTRO:-}" || -z "${AMENT_PREFIX_PATH:-}" ]] || ! command -v ros2 >/dev/null 2>&1; then
             if [[ -f /opt/ros/humble/setup.bash ]]; then
@@ -108,37 +114,46 @@ case "$TARGET" in
             echo "[build] ERROR: ros2 not on PATH and /opt/ros/humble/setup.bash was not usable" >&2
             missing=1
         fi
-        if ! command -v colcon >/dev/null 2>&1; then
-            echo "[build] ERROR: colcon not on PATH. Install python3-colcon-common-extensions." >&2
-            missing=1
-        fi
         [[ "$missing" == "1" ]] && exit 1
 
-        if [[ -f .gitmodules ]]; then
-            echo "[build] syncing git submodules for native build"
-            git submodule sync --recursive
-            git submodule update --init --recursive
+        if [[ "$RTABMAP_BUILD" == "apt" ]]; then
+            if ! ros2 pkg prefix rtabmap_slam >/dev/null 2>&1; then
+                echo "[build] ERROR: RBNX_RTABMAP_BUILD=apt needs ros-humble-rtabmap-ros installed on the host." >&2
+                exit 1
+            fi
+            echo "[build] native apt OK: using host rtabmap_slam"
+        else
+            if ! command -v colcon >/dev/null 2>&1; then
+                echo "[build] ERROR: colcon not on PATH. Install python3-colcon-common-extensions." >&2
+                exit 1
+            fi
+
+            if [[ -f .gitmodules ]]; then
+                echo "[build] syncing git submodules for native build"
+                git submodule sync --recursive
+                git submodule update --init --recursive
+            fi
+
+            NATIVE_WS="$PKG/$BUILD/native_ws"
+            mkdir -p "$NATIVE_WS/src"
+            ln -sfn "$PKG/third_party/cpp_pubsub" "$NATIVE_WS/src/cpp_pubsub"
+            ln -sfn "$PKG/third_party/rtabmap" "$NATIVE_WS/src/rtabmap"
+            ln -sfn "$PKG/third_party/rtabmap_ros" "$NATIVE_WS/src/rtabmap_ros"
+
+            echo "[build] colcon build native overlay -> $NATIVE_WS/install"
+            (
+                cd "$NATIVE_WS"
+                colcon build --event-handlers console_direct+ \
+                    --packages-up-to cpp_pubsub rtabmap_slam rtabmap_odom rtabmap_viz \
+                    --cmake-args \
+                        -DCMAKE_BUILD_TYPE=Release \
+                        -DROBONIX_ZC_BUILD_EXAMPLES=OFF \
+                        -DBUILD_APP=OFF \
+                        -DBUILD_TOOLS=OFF \
+                        -DBUILD_EXAMPLES=OFF
+            )
+            echo "[build] native overlay OK: $NATIVE_WS/install/setup.bash"
         fi
-
-        NATIVE_WS="$PKG/$BUILD/native_ws"
-        mkdir -p "$NATIVE_WS/src"
-        ln -sfn "$PKG/third_party/cpp_pubsub" "$NATIVE_WS/src/cpp_pubsub"
-        ln -sfn "$PKG/third_party/rtabmap" "$NATIVE_WS/src/rtabmap"
-        ln -sfn "$PKG/third_party/rtabmap_ros" "$NATIVE_WS/src/rtabmap_ros"
-
-        echo "[build] colcon build native overlay -> $NATIVE_WS/install"
-        (
-            cd "$NATIVE_WS"
-            colcon build --event-handlers console_direct+ \
-                --packages-up-to cpp_pubsub rtabmap_slam rtabmap_odom rtabmap_viz \
-                --cmake-args \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    -DROBONIX_ZC_BUILD_EXAMPLES=OFF \
-                    -DBUILD_APP=OFF \
-                    -DBUILD_TOOLS=OFF \
-                    -DBUILD_EXAMPLES=OFF
-        )
-        echo "[build] native overlay OK: $NATIVE_WS/install/setup.bash"
         ;;
 
     *)

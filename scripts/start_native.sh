@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MulanPSL-2.0
 # mapping_rbnx native (no-docker) launcher. Mirrors docker/entrypoint.sh
-# but runs directly on the host ROS 2 install (rtabmap_* from apt).
+# but runs directly on the host ROS 2 install. RTAB-Map can come from
+# the vendored native overlay or from host apt packages.
 # Picked by scripts/start.sh when ROBONIX_MAPPING_FORCE=native (or
 # ROBONIX_MAPPING_PLATFORM matches the native whitelist — jetson_orin).
 #
@@ -17,7 +18,7 @@ set -eo pipefail
 PKG="${RBNX_PACKAGE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$PKG"
 
-# ── ROS 2 host base + package overlay ─────────────────────────────────
+# ── ROS 2 host base + optional package overlay ────────────────────────
 if [[ -z "${ROS_DISTRO:-}" || -z "${AMENT_PREFIX_PATH:-}" ]] || ! command -v ros2 >/dev/null 2>&1; then
     if [[ -f /opt/ros/humble/setup.bash ]]; then
         set +u; source /opt/ros/humble/setup.bash; set -u
@@ -27,19 +28,33 @@ if [[ -z "${ROS_DISTRO:-}" || -z "${AMENT_PREFIX_PATH:-}" ]] || ! command -v ros
         exit 2
     fi
 fi
+RTABMAP_BUILD="${ROBONIX_MAPPING_RTABMAP_BUILD:-}"
+if [[ -z "$RTABMAP_BUILD" && -f "$PKG/rbnx-build/rtabmap_build" ]]; then
+    RTABMAP_BUILD="$(<"$PKG/rbnx-build/rtabmap_build")"
+fi
+RTABMAP_BUILD="${RTABMAP_BUILD:-source}"
 NATIVE_OVERLAY="$PKG/rbnx-build/native_ws/install/setup.bash"
-if [[ -f "$NATIVE_OVERLAY" ]]; then
-    set +u; source "$NATIVE_OVERLAY"; set -u
+if [[ "$RTABMAP_BUILD" == "source" ]]; then
+    if [[ -f "$NATIVE_OVERLAY" ]]; then
+        set +u; source "$NATIVE_OVERLAY"; set -u
+    else
+        echo "[mapping-native] ERR: native overlay missing: $NATIVE_OVERLAY" >&2
+        echo "[mapping-native]      run \`RBNX_BUILD_TARGET=jetson-native rbnx build\` first" >&2
+        exit 2
+    fi
+elif [[ "$RTABMAP_BUILD" == "apt" ]]; then
+    export ROBONIX_MAPPING_RGB_ZC="${ROBONIX_MAPPING_RGB_ZC:-0}"
+    export ROBONIX_MAPPING_DEPTH_ZC="${ROBONIX_MAPPING_DEPTH_ZC:-0}"
+    export ROBONIX_MAPPING_SCAN_CLOUD_ZC="${ROBONIX_MAPPING_SCAN_CLOUD_ZC:-0}"
 else
-    echo "[mapping-native] ERR: native overlay missing: $NATIVE_OVERLAY" >&2
-    echo "[mapping-native]      run \`RBNX_BUILD_TARGET=jetson-native rbnx build\` first" >&2
+    echo "[mapping-native] ERR: ROBONIX_MAPPING_RTABMAP_BUILD=$RTABMAP_BUILD not in {source,apt}" >&2
     exit 2
 fi
 
-# Fail loud if the overlay did not provide rtabmap_slam.
+# Fail loud if neither the overlay nor the host apt package provides rtabmap.
 if ! ros2 pkg prefix rtabmap_slam >/dev/null 2>&1; then
-    echo "[mapping-native] ERR: rtabmap_slam not found after sourcing native overlay." >&2
-    echo "[mapping-native]      rebuild $PKG/rbnx-build/native_ws" >&2
+    echo "[mapping-native] ERR: rtabmap_slam not found for RTABMAP_BUILD=$RTABMAP_BUILD." >&2
+    echo "[mapping-native]      use source overlay or install ros-humble-rtabmap-ros" >&2
     exit 2
 fi
 
