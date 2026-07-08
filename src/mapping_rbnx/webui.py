@@ -10,7 +10,7 @@ A dependency-light (stdlib http.server + Pillow) page that lets an operator
 
 Runs inside the mapping bridge process, so its buttons call the same
 map_ops impls the gRPC/MCP capabilities use — no extra round trip. It reads
-the live map/pose off the shared rclpy node (map_ops._get_node()).
+the live map/pose off its own dedicated rclpy node (see _ensure_subscriptions).
 
 Disabled by default; set MAPPING_WEBUI_PORT (e.g. 8091) to enable. The server
 binds 0.0.0.0 so it's reachable from the operator's laptop on the robot LAN.
@@ -36,10 +36,13 @@ MAPS_DIR = os.environ.get("MAPPING_MAPS_DIR", "/mapping/maps")
 MAP_TOPIC = os.environ.get("MAPPING_MAP_TOPIC", "/map")
 POSE_TOPIC = os.environ.get("MAPPING_POSE_TOPIC", "/robonix/map/pose")
 
-# Latest map / pose, filled by ROS subscriptions on the shared node.
+# Latest map / pose, filled by ROS subscriptions on the webui's own node.
 _latest = {"grid": None, "pose": None}
 _subscribed = False
 _sub_lock = threading.Lock()
+# Keep the dedicated node + executor alive for the process lifetime.
+_webui_node = None
+_webui_exec = None
 
 # ── activity log ──────────────────────────────────────────────────────────────
 # A small in-memory ring of timestamped action records so the operator can see,
@@ -102,18 +105,38 @@ def _track_convergence(sx: float, sy: float, stheta: float, settle_s: float = 4.
 
 def _ensure_subscriptions() -> None:
     """Subscribe (once) to the live occupancy grid + pose so the UI can render
-    them. Best-effort — if ROS isn't up the preview just stays empty."""
-    global _subscribed
+    them. Best-effort — if ROS isn't up yet the preview stays empty and we
+    retry on the next request.
+
+    Uses a DEDICATED node + executor rather than map_ops' shared node. The
+    shared node's SingleThreadedExecutor is already spinning by the time the
+    UI is first hit, and a subscription created on an already-spinning
+    SingleThreadedExecutor is not reliably serviced — the callback never fires
+    and the map stays blank even though /map is publishing. Here the
+    subscriptions are created BEFORE this node's executor starts spinning, so
+    they are always serviced.
+    """
+    global _subscribed, _webui_node, _webui_exec
     with _sub_lock:
         if _subscribed:
             return
-        node = map_ops._get_node()
-        if node is None:
-            return
         try:
+            import rclpy
+            from rclpy.node import Node
+            from rclpy.executors import SingleThreadedExecutor
             from nav_msgs.msg import OccupancyGrid
             from geometry_msgs.msg import PoseWithCovarianceStamped
             from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy
+
+            # The bridge process initialises rclpy lazily (map_ops._get_node on
+            # the first map op). The UI may be hit before any map op, so init
+            # the context here if needed — mirrors map_ops' own guard. Without
+            # this the UI returned before ever subscribing and stayed blank.
+            if not rclpy.ok():
+                rclpy.init(args=None)
+
+            # Match rtabmap's /map publisher (RELIABLE + TRANSIENT_LOCAL) so the
+            # last latched grid is delivered immediately on subscribe.
             latched = QoSProfile(depth=1)
             latched.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
             latched.reliability = QoSReliabilityPolicy.RELIABLE
@@ -124,10 +147,15 @@ def _ensure_subscriptions() -> None:
             def _on_pose(msg):
                 _latest["pose"] = msg
 
+            node = Node("mapping_webui")
             node.create_subscription(OccupancyGrid, MAP_TOPIC, _on_grid, latched)
             node.create_subscription(PoseWithCovarianceStamped, POSE_TOPIC, _on_pose, 10)
+            ex = SingleThreadedExecutor()
+            ex.add_node(node)
+            threading.Thread(target=ex.spin, daemon=True).start()
+            _webui_node, _webui_exec = node, ex
             _subscribed = True
-            log.info("webui subscribed: map=%s pose=%s", MAP_TOPIC, POSE_TOPIC)
+            log.info("webui subscribed (dedicated node): map=%s pose=%s", MAP_TOPIC, POSE_TOPIC)
         except Exception as e:  # noqa: BLE001
             log.warning("webui subscriptions failed: %s", e)
 

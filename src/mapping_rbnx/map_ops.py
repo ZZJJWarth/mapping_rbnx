@@ -338,15 +338,37 @@ def save_map_impl(map_id: str, note: str = "",
     try:
         os.makedirs(map_dir, exist_ok=True)
 
-        # If rtabmap's live db is a different file (ephemeral / different id),
-        # copy it in so the saved map is self-contained.
-        if active_db and os.path.isfile(active_db) and os.path.abspath(active_db) != os.path.abspath(db_path):
+        # Resolve the live rtabmap db to copy so the saved map is
+        # self-contained. The caller passes active_db for a named-map run; an
+        # ephemeral run (no map_id) leaves it empty, and rtabmap then writes to
+        # its default ~/.ros/rtabmap.db. Fall back to that (and an explicit
+        # RTABMAP_DATABASE_PATH override) so a Save in ephemeral mode still
+        # captures a real db instead of a preview-only "no db" entry.
+        live_db = active_db if (active_db and os.path.isfile(active_db)) else None
+        if live_db is None:
+            for cand in (
+                os.environ.get("RTABMAP_DATABASE_PATH", ""),
+                os.path.expanduser("~/.ros/rtabmap.db"),
+            ):
+                if cand and os.path.isfile(cand):
+                    live_db = cand
+                    break
+        if live_db and os.path.abspath(live_db) != os.path.abspath(db_path):
             import shutil
-            shutil.copy2(active_db, db_path)
+            shutil.copy2(live_db, db_path)
 
         # Portable preview (pgm/png/pcd/meta) from the live /map + cloud topics.
+        # Locate save_map.py RELATIVE TO THIS MODULE, not via PKG_HOST_DIR:
+        # PKG_HOST_DIR is the *host* path (for atlas advertising) and does not
+        # exist inside the docker container where this code runs, so using it
+        # made the file check fail and the preview (occupancy.png) was silently
+        # skipped — the saved map then showed a broken image in the UI library.
+        # __file__ is <pkg>/src/mapping_rbnx/map_ops.py in both host and
+        # container, so ../../scripts/save_map.py resolves correctly either way.
         import subprocess
-        script = os.path.join(PKG_HOST_DIR, "scripts", "save_map.py")
+        script = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "save_map.py")
+        )
         if os.path.isfile(script):
             subprocess.run(
                 ["python3", script, "--out-dir", map_dir, "--timeout", "10"],
