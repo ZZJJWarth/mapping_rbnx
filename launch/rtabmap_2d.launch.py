@@ -121,9 +121,21 @@ def _make_nodes(context, *args, **kwargs):
     have_rgbd = have_rgb and have_depth
     rtabmap_build = os.environ.get("ROBONIX_MAPPING_RTABMAP_BUILD", "source").lower()
     zc_supported = rtabmap_build != "apt"
-    use_rgb_zc = zc_supported and have_rgbd and os.environ.get("ROBONIX_MAPPING_RGB_ZC", "1").lower() not in ("0", "false", "no")
-    use_depth_zc = use_rgb_zc and os.environ.get("ROBONIX_MAPPING_DEPTH_ZC", "1").lower() not in ("0", "false", "no")
-    use_scan_cloud_zc = zc_supported and have_scan_cloud and os.environ.get("ROBONIX_MAPPING_SCAN_CLOUD_ZC", "1").lower() not in ("0", "false", "no")
+    use_rgb_zc = (
+        zc_supported and have_rgbd
+        and os.environ.get("ROBONIX_MAPPING_RGB_ZC", "1").lower()
+        not in ("0", "false", "no")
+    )
+    use_depth_zc = (
+        use_rgb_zc
+        and os.environ.get("ROBONIX_MAPPING_DEPTH_ZC", "1").lower()
+        not in ("0", "false", "no")
+    )
+    use_scan_cloud_zc = (
+        zc_supported and have_scan_cloud
+        and os.environ.get("ROBONIX_MAPPING_SCAN_CLOUD_ZC", "1").lower()
+        not in ("0", "false", "no")
+    )
     have_odom = bool(odom_topic) and odom_topic != _NONE
 
     if not (have_scan or have_scan_cloud or have_rgbd):

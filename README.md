@@ -91,6 +91,9 @@ use the repository root as the build context:
 docker build -f docker/Dockerfile --target rtabmap-source -t robonix-mapping .
 ```
 
+Set `RBNX_DOCKER_PULL=1` when you want Docker to refresh base-image metadata
+during the package build.
+
 For native Jetson, `apt` expects `ros-humble-rtabmap-ros` to already be
 installed on the host. The `apt` path defaults `ROBONIX_MAPPING_*_ZC=0` so the
 launch does not pass zero-copy-only subscriptions to the stock packages.

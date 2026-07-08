@@ -15,6 +15,7 @@
 # RBNX_BUILD_CLEAN=1     nuke rbnx-build/ and rebuild without docker cache.
 # RBNX_BUILD_VARIANT=fastlio2_full  (x86-docker only) heavy FASTLIO2 image.
 # RBNX_RTABMAP_BUILD=source|apt     source keeps Robonix ZC patches; apt is baseline.
+# RBNX_DOCKER_PULL=1     ask docker to refresh base-image metadata during build.
 set -euo pipefail
 
 PKG="${RBNX_PACKAGE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -59,7 +60,9 @@ if command -v rbnx >/dev/null 2>&1; then
     echo "[build] rbnx codegen ${FLAGS[*]}"
     rbnx codegen -p "$PKG" "${FLAGS[@]}"
 else
-    if [[ -d "$BUILD/codegen/proto_gen" && -d "$BUILD/codegen/robonix_mcp_types" ]]; then
+    if [[ -f "$BUILD/codegen/proto_gen/map_pb2.py" \
+       && -f "$BUILD/codegen/proto_gen/robonix_contracts_pb2_grpc.py" \
+       && -f "$BUILD/codegen/robonix_mcp_types/map_mcp.py" ]]; then
         echo "[build] WARNING: rbnx not in PATH — reusing existing codegen output"
     else
         echo "[build] ERROR: rbnx not in PATH and codegen output is missing" >&2
@@ -78,6 +81,7 @@ case "$TARGET" in
             exit 1
         fi
         DOCKER_BUILD_FLAGS=(--network=host --pull=false)
+        [[ "${RBNX_DOCKER_PULL:-}" == "1" ]] && DOCKER_BUILD_FLAGS=(--network=host --pull=true)
         [[ "$CLEAN" == "1" ]] && DOCKER_BUILD_FLAGS+=(--no-cache)
         if [[ "$TARGET" == "jetson-docker" ]]; then
             DF=docker/Dockerfile.jetson

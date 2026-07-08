@@ -13,7 +13,7 @@
 #                       (MAPPING_LAUNCH_DIR points at the package's launch/).
 #
 # SIGTERM tears down both children.
-set -eo pipefail
+set -euo pipefail
 
 PKG="${RBNX_PACKAGE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$PKG"
@@ -33,8 +33,12 @@ if [[ -z "$RTABMAP_BUILD" && -f "$PKG/rbnx-build/rtabmap_build" ]]; then
     RTABMAP_BUILD="$(<"$PKG/rbnx-build/rtabmap_build")"
 fi
 RTABMAP_BUILD="${RTABMAP_BUILD:-source}"
+export ROBONIX_MAPPING_RTABMAP_BUILD="$RTABMAP_BUILD"
 NATIVE_OVERLAY="$PKG/rbnx-build/native_ws/install/setup.bash"
 if [[ "$RTABMAP_BUILD" == "source" ]]; then
+    export ROBONIX_MAPPING_RGB_ZC="${ROBONIX_MAPPING_RGB_ZC:-1}"
+    export ROBONIX_MAPPING_DEPTH_ZC="${ROBONIX_MAPPING_DEPTH_ZC:-1}"
+    export ROBONIX_MAPPING_SCAN_CLOUD_ZC="${ROBONIX_MAPPING_SCAN_CLOUD_ZC:-1}"
     if [[ -f "$NATIVE_OVERLAY" ]]; then
         set +u; source "$NATIVE_OVERLAY"; set -u
     else
@@ -60,8 +64,10 @@ fi
 
 # ── PYTHONPATH: pkg src + codegen stubs + robonix-api ──────────────────
 CODEGEN="$PKG/rbnx-build/codegen"
-if [[ ! -d "$CODEGEN/proto_gen" ]]; then
-    echo "[mapping-native] ERR: $CODEGEN/proto_gen missing — run \`rbnx codegen -p $PKG\` first" >&2
+if [[ ! -f "$CODEGEN/proto_gen/map_pb2.py" \
+   || ! -f "$CODEGEN/proto_gen/robonix_contracts_pb2_grpc.py" \
+   || ! -f "$CODEGEN/robonix_mcp_types/map_mcp.py" ]]; then
+    echo "[mapping-native] ERR: map codegen output missing — run \`rbnx codegen -p $PKG --mcp\` first" >&2
     exit 2
 fi
 export PYTHONPATH="$PKG/src:$CODEGEN/proto_gen:$CODEGEN/robonix_mcp_types:${PYTHONPATH:-}"
@@ -102,7 +108,10 @@ trap cleanup EXIT INT TERM
 # Without this, start_native.sh bypasses the bridge-write gate, runs engine
 # on a stale resolved.yaml from a previous run, fails fast, and trap kills
 # the bridge BEFORE rbnx delivers CMD_INIT — Cancelling all calls error.
-rm -f /tmp/mapping_algo /tmp/*_resolved.yaml
+rm -f /tmp/mapping_algo \
+    /tmp/rtabmap_resolved.yaml \
+    /tmp/dlio_resolved.yaml \
+    /tmp/fastlio2_resolved.yaml
 
 # ── 1. atlas_bridge (the cap) ──────────────────────────────────────────
 "$PYBIN" -u -m mapping_rbnx.atlas_bridge 2>&1 | sed 's/^/[bridge] /' &
@@ -114,6 +123,10 @@ for _ in $(seq 1 60); do
     sleep 0.5
 done
 ALGO="$(cat /tmp/mapping_algo 2>/dev/null || echo rtabmap)"
+case "$ALGO" in
+    rtabmap|dlio|fastlio2) ;;
+    *) echo "[mapping-native] ERR: invalid mapping algo from bridge: $ALGO" >&2; exit 2 ;;
+esac
 export MAPPING_ALGO="$ALGO"
 for _ in $(seq 1 60); do
     [ -f "/tmp/${ALGO}_resolved.yaml" ] && break

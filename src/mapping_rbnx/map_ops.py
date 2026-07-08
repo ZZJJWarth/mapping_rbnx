@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: MulanPSL-2.0
 """Runtime map-management operations for the mapping service.
 
-Backs three RPC+MCP capabilities (declared in atlas_bridge):
+Backs runtime RPC+MCP capabilities (declared in atlas_bridge):
   - save_map      snapshot the live SLAM map to disk under a map_id
   - load_map      switch rtabmap onto a saved map (localization / mapping)
   - pose_estimate seed a pose so rtabmap's localization re-converges
+  - switch_mode   flip the current rtabmap session's mapping mode
 
 These talk to the *running* rtabmap (launched as a separate process by
 start_engine.sh in the same ROS graph) over DDS — this module spins its own
@@ -37,11 +38,6 @@ RTABMAP_NS = os.environ.get("MAPPING_RTABMAP_NS", "/rtabmap")
 # Where rtabmap subscribes for an externally-seeded pose. The launch remaps
 # the standard `/initialpose` into rtabmap; keep them in sync.
 INITIALPOSE_TOPIC = os.environ.get("MAPPING_INITIALPOSE_TOPIC", "/initialpose")
-# Live map-frame pose (PoseWithCovarianceStamped), published by the tf_to_pose
-# adapter on the bound `robonix/service/map/pose` contract. get_pose reads it.
-POSE_TOPIC = os.environ.get("MAPPING_POSE_TOPIC", "/robonix/map/pose")
-
-
 def _sanitize_map_id(map_id: str) -> str:
     import re
     return re.sub(r"[^A-Za-z0-9._-]", "_", (map_id or "").strip()) or "default"
@@ -188,80 +184,10 @@ def load_map_impl(map_id: str, mode: str = "localization",
         if has_initial_pose:
             ps = pose_estimate_impl(x, y, theta)
             seeded = f"; {ps['detail']}"
-        set_current_mode(mode)
         return {"ok": True, "detail": f"loaded {map_id} in {mode} mode{seeded}"}
     except Exception as e:  # noqa: BLE001
         log.exception("load_map failed")
         return {"ok": False, "detail": str(e)}
-
-
-# ── mode tracking (get_mode) ──────────────────────────────────────────────────
-# Single source of truth for "which SLAM mode is in effect right now", updated
-# by init (startup map_mode), switch_mode and load_map — so get_mode reflects
-# the real runtime mode regardless of how it changed (config, MCP, or webui).
-_current_mode: str = ""
-
-
-def set_current_mode(mode: str) -> None:
-    """Record the SLAM mode now in effect. Called by atlas_bridge.init with the
-    startup map_mode and by switch_mode_impl / load_map_impl on success."""
-    global _current_mode
-    if mode:
-        _current_mode = mode.strip().lower()
-
-
-def get_mode_impl() -> dict:
-    """Return the SLAM mode currently in effect (read-only). Returns
-    {ok, mode, detail}; mode is "" with ok=False before init has run."""
-    if not _current_mode:
-        return {"ok": False, "mode": "", "detail": "mode not initialized yet"}
-    return {"ok": True, "mode": _current_mode, "detail": ""}
-
-
-def get_pose_impl(timeout_s: float = 2.0) -> dict:
-    """Read the robot's current pose in the MAP frame from the live pose topic
-    (PoseWithCovarianceStamped on POSE_TOPIC). Returns
-    {ok, x, y, theta (yaw rad), frame_id, detail}. ok=False with a hint if no
-    pose arrives within timeout_s (mapping not localized / not publishing)."""
-    node = _get_node()
-    if node is None:
-        return {"ok": False, "x": 0.0, "y": 0.0, "theta": 0.0, "frame_id": "",
-                "detail": "rclpy node unavailable (ROS not running?)"}
-    try:
-        from geometry_msgs.msg import PoseWithCovarianceStamped
-        from rclpy.qos import (QoSProfile, ReliabilityPolicy,
-                               DurabilityPolicy, HistoryPolicy)
-        got = threading.Event()
-        holder: dict = {}
-
-        def _cb(msg):
-            holder["msg"] = msg
-            got.set()
-
-        qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
-                         durability=DurabilityPolicy.VOLATILE,
-                         history=HistoryPolicy.KEEP_LAST, depth=1)
-        sub = node.create_subscription(PoseWithCovarianceStamped, POSE_TOPIC, _cb, qos)
-        try:
-            got.wait(timeout=timeout_s)
-        finally:
-            node.destroy_subscription(sub)
-        if "msg" not in holder:
-            return {"ok": False, "x": 0.0, "y": 0.0, "theta": 0.0, "frame_id": "",
-                    "detail": f"no pose on {POSE_TOPIC} within {timeout_s:.1f}s "
-                              "(is mapping localized / publishing?)"}
-        msg = holder["msg"]
-        p = msg.pose.pose
-        q = p.orientation
-        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
-                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-        return {"ok": True, "x": float(p.position.x), "y": float(p.position.y),
-                "theta": float(yaw), "frame_id": msg.header.frame_id or "map",
-                "detail": ""}
-    except Exception as e:  # noqa: BLE001
-        log.exception("get_pose failed")
-        return {"ok": False, "x": 0.0, "y": 0.0, "theta": 0.0, "frame_id": "",
-                "detail": str(e)}
 
 
 # ── switch_mode ───────────────────────────────────────────────────────────────
@@ -287,7 +213,6 @@ def switch_mode_impl(mode: str) -> dict:
         if not ok:
             return {"ok": False, "detail": f"{info} — rtabmap may lack the mode service "
                                            "(fall back to restart with config map_mode)"}
-        set_current_mode(mode)
         return {"ok": True, "detail": f"switched to {mode} mode"}
     except Exception as e:  # noqa: BLE001
         log.exception("switch_mode failed")

@@ -21,6 +21,16 @@ if [ -f /opt/rtabmap_ws/install/setup.bash ]; then
     source /opt/rtabmap_ws/install/setup.bash
 fi
 
+validate_zenoh_value() {
+    # Keep values safe for sed replacement and Zenoh's JSON5 endpoint fields.
+    local name="$1"
+    local value="$2"
+    if [[ ! "$value" =~ ^[A-Za-z0-9._:/-]+$ ]]; then
+        echo "[entrypoint] invalid $name: $value" >&2
+        return 1
+    fi
+}
+
 configure_zenoh_session() {
     if [ "${RMW_IMPLEMENTATION:-}" != "rmw_zenoh_cpp" ] || [ -z "${ROBONIX_ZENOH_ROUTER:-}" ]; then
         return 0
@@ -32,6 +42,11 @@ configure_zenoh_session() {
         return 1
     fi
     local mode="${ROBONIX_ZENOH_MODE:-client}"
+    validate_zenoh_value ROBONIX_ZENOH_MODE "$mode"
+    validate_zenoh_value ROBONIX_ZENOH_ROUTER "$ROBONIX_ZENOH_ROUTER"
+    if [ -n "${ROBONIX_ZENOH_LISTEN:-}" ]; then
+        validate_zenoh_value ROBONIX_ZENOH_LISTEN "$ROBONIX_ZENOH_LISTEN"
+    fi
     sed \
         -e "s#mode: \"peer\"#mode: \"${mode}\"#" \
         -e "s#\"tcp/localhost:7447\"#\"${ROBONIX_ZENOH_ROUTER}\"#g" \
@@ -88,6 +103,10 @@ for _ in $(seq 1 30); do
     sleep 0.5
 done
 ALGO="$(cat /tmp/mapping_algo 2>/dev/null || echo rtabmap)"
+case "$ALGO" in
+    rtabmap|dlio|fastlio2) ;;
+    *) echo "[entrypoint] invalid mapping algo from bridge: $ALGO" >&2; exit 2 ;;
+esac
 export MAPPING_ALGO="$ALGO"
 RESOLVED="/tmp/${ALGO}_resolved.yaml"
 for _ in $(seq 1 30); do
