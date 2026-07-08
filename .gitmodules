@@ -11,5 +11,5 @@
 	branch = zc_immigrate
 [submodule "third_party/cpp_pubsub"]
 	path = third_party/cpp_pubsub
-	url = git@github.com:ZZJJWarth/boost_zc_lib.git
+	url = https://github.com/ZZJJWarth/boost_zc_lib.git
 	branch = master

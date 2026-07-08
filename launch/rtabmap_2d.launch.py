@@ -43,6 +43,28 @@ from launch_ros.actions import Node
 _NONE = "<none>"  # sentinel for "no such topic in this deploy"
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read an integer environment override or raise a clear launch error."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got {raw!r}") from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float environment override or raise a clear launch error."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number, got {raw!r}") from exc
+
+
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("use_sim_time", default_value="true"),
@@ -219,8 +241,8 @@ def _make_nodes(context, *args, **kwargs):
             "depth_zc_topic": os.environ.get("ROBONIX_MAPPING_DEPTH_ZC_TOPIC", "/camera/depth_zc"),
             "scan_cloud_zc_topic": os.environ.get("ROBONIX_MAPPING_SCAN_CLOUD_ZC_TOPIC", "/scanner/cloud_zc"),
             "rgb_zc_shm_name": os.environ.get("ROBONIX_MAPPING_RGB_ZC_SHM", "robonix_zc_camera"),
-            "rgb_zc_shm_size": int(os.environ.get("ROBONIX_MAPPING_RGB_ZC_SHM_SIZE", "67108864")),
-            "rgb_zc_stamp_tolerance": float(os.environ.get("ROBONIX_MAPPING_RGB_ZC_STAMP_TOLERANCE", "0.05")),
+            "rgb_zc_shm_size": _env_int("ROBONIX_MAPPING_RGB_ZC_SHM_SIZE", 67108864),
+            "rgb_zc_stamp_tolerance": _env_float("ROBONIX_MAPPING_RGB_ZC_STAMP_TOLERANCE", 0.05),
         })
 
     rtabmap_remappings = [

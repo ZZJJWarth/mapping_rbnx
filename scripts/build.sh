@@ -59,8 +59,13 @@ if command -v rbnx >/dev/null 2>&1; then
     echo "[build] rbnx codegen ${FLAGS[*]}"
     rbnx codegen -p "$PKG" "${FLAGS[@]}"
 else
-    echo "[build] WARNING: rbnx not in PATH — skipping proto codegen"
-    echo "[build]   install robonix-cli + run \`rbnx setup\` once from the robonix source root"
+    if [[ -d "$BUILD/codegen/proto_gen" && -d "$BUILD/codegen/robonix_mcp_types" ]]; then
+        echo "[build] WARNING: rbnx not in PATH — reusing existing codegen output"
+    else
+        echo "[build] ERROR: rbnx not in PATH and codegen output is missing" >&2
+        echo "[build]   install robonix-cli + run \`rbnx setup\` once from the robonix source root" >&2
+        exit 1
+    fi
 fi
 
 echo "[build] target=$TARGET rtabmap=$RTABMAP_BUILD"
@@ -92,6 +97,9 @@ case "$TARGET" in
         if [[ "$CLEAN" != "1" ]] && docker image inspect "$IMG" >/dev/null 2>&1; then
             echo "[build] image $IMG present; rebuilding incrementally"
         fi
+        # Only x86 light+apt can skip submodules: it uses stock RTAB-Map and
+        # no FASTLIO2 sources. Source, Jetson docker, and fastlio2_full need
+        # at least one vendored workspace in the Docker context.
         if [[ -f .gitmodules && ( "$TARGET" != "x86-docker" || "$VARIANT" != "light" || "$RTABMAP_BUILD" != "apt" ) ]]; then
             echo "[build] syncing git submodules for docker build context"
             git submodule sync --recursive
@@ -136,9 +144,9 @@ case "$TARGET" in
 
             NATIVE_WS="$PKG/$BUILD/native_ws"
             mkdir -p "$NATIVE_WS/src"
-            ln -sfn "$PKG/third_party/cpp_pubsub" "$NATIVE_WS/src/cpp_pubsub"
-            ln -sfn "$PKG/third_party/rtabmap" "$NATIVE_WS/src/rtabmap"
-            ln -sfn "$PKG/third_party/rtabmap_ros" "$NATIVE_WS/src/rtabmap_ros"
+            ln -sfnT "$PKG/third_party/cpp_pubsub" "$NATIVE_WS/src/cpp_pubsub"
+            ln -sfnT "$PKG/third_party/rtabmap" "$NATIVE_WS/src/rtabmap"
+            ln -sfnT "$PKG/third_party/rtabmap_ros" "$NATIVE_WS/src/rtabmap_ros"
 
             echo "[build] colcon build native overlay -> $NATIVE_WS/install"
             (

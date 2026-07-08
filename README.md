@@ -82,6 +82,15 @@ For Docker:
 RBNX_RTABMAP_BUILD=apt rbnx build -f robonix_manifest.yaml
 ```
 
+`RBNX_RTABMAP_BUILD` is a build-time selector. Docker images set the matching
+runtime `ROBONIX_MAPPING_RTABMAP_BUILD` internally so the launch file knows
+whether zero-copy RTAB-Map parameters are supported. For manual Docker builds,
+use the repository root as the build context:
+
+```bash
+docker build -f docker/Dockerfile --target rtabmap-source -t robonix-mapping .
+```
+
 For native Jetson, `apt` expects `ros-humble-rtabmap-ros` to already be
 installed on the host. The `apt` path defaults `ROBONIX_MAPPING_*_ZC=0` so the
 launch does not pass zero-copy-only subscriptions to the stock packages.

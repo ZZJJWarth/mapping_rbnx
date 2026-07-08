@@ -75,15 +75,15 @@ start: bash scripts/start.sh
 # Saved maps live under {MAPPING_MAPS_DIR}/{map_id}/ as rtabmap.db +
 # occupancy.pgm/.yaml/.png + cloud.pcd + meta.yaml (offline-previewable).
 
-# Only list what we actually declare on atlas at runtime. Aspirational
-# entries (status / save_map / load_map / switch_mode / set_initial_pose)
-# were removed — they shipped as "TODO" markers but boot ran fine without
-# them, so manifest claims and runtime behaviour drifted apart. The
-# moment any of those gRPC services is implemented, add it back AND
-# wire the DeclareInterface call in atlas_bridge.
+# Only list what we actually declare on atlas at runtime. Runtime map
+# operations are backed by atlas_bridge gRPC + MCP adapters.
 capabilities:
   - name: robonix/service/map/driver
   - name: robonix/service/map/occupancy_grid
   - name: robonix/service/map/pointcloud
   - name: robonix/service/map/pose
   - name: robonix/service/map/odom
+  - name: robonix/service/map/save_map
+  - name: robonix/service/map/load_map
+  - name: robonix/service/map/pose_estimate
+  - name: robonix/service/map/switch_mode
