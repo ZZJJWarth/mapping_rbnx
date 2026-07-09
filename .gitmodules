@@ -3,7 +3,7 @@
 	url = https://github.com/enkerewpo/FASTLIO2_ROS2.git
 [submodule "third_party/rtabmap_ros"]
 	path = third_party/rtabmap_ros
-	url = https://github.com/ZZJJWarth/rtabmap_ros.git
+	url = https://github.com/syswonder/service-rtabmap-ros-rbnx.git
 	branch = zc_immigrate
 [submodule "third_party/rtabmap"]
 	path = third_party/rtabmap
@@ -11,5 +11,5 @@
 	branch = zc_immigrate
 [submodule "third_party/cpp_pubsub"]
 	path = third_party/cpp_pubsub
-	url = https://github.com/ZZJJWarth/boost_zc_lib.git
-	branch = master
+	url = https://github.com/syswonder/boost_zc_lib.git
+	branch = main

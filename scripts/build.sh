@@ -14,8 +14,8 @@
 #
 # RBNX_BUILD_CLEAN=1     nuke rbnx-build/ and rebuild without docker cache.
 # RBNX_BUILD_VARIANT=fastlio2_full  (x86-docker only) heavy FASTLIO2 image.
-# RBNX_RTABMAP_BUILD=source|apt     source keeps Robonix ZC patches; apt is baseline.
-# RBNX_DOCKER_PULL=1     ask docker to refresh base-image metadata during build.
+# RBNX_RTABMAP_BUILD=source|apt     native only: source keeps Robonix ZC patches;
+#                                   apt is the host-package baseline.
 set -euo pipefail
 
 PKG="${RBNX_PACKAGE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -27,7 +27,6 @@ BUILD="rbnx-build"
 CLEAN="${RBNX_BUILD_CLEAN:-}"
 VARIANT="${RBNX_BUILD_VARIANT:-light}"
 IMG="${ROBONIX_MAPPING_IMAGE:-robonix-mapping}"
-RTABMAP_BUILD="${RBNX_RTABMAP_BUILD:-source}"
 if [[ -n "${RBNX_BUILD_TARGET:-}" ]]; then
     TARGET="$RBNX_BUILD_TARGET"
 elif [[ "$(uname -m)" == "aarch64" ]]; then
@@ -38,10 +37,13 @@ fi
 ROS_BASE_IMAGE="${ROBONIX_MAPPING_ROS_BASE_IMAGE:-robonix-ros:humble-ros-base}"
 UPSTREAM_ROS_BASE_IMAGE="ros:humble-ros-base"
 JETSON_ROS_BASE_IMAGE="${ROBONIX_MAPPING_JETSON_ROS_BASE_IMAGE:-dustynv/ros:humble-ros-base-l4t-r36.4.0}"
-case "$RTABMAP_BUILD" in
-    source|apt) ;;
-    *) echo "[build] unknown RBNX_RTABMAP_BUILD: $RTABMAP_BUILD (source|apt)" >&2; exit 2 ;;
-esac
+RTABMAP_BUILD="${RBNX_RTABMAP_BUILD:-source}"
+if [[ "$TARGET" == "jetson-native" ]]; then
+    case "$RTABMAP_BUILD" in
+        source|apt) ;;
+        *) echo "[build] unknown RBNX_RTABMAP_BUILD: $RTABMAP_BUILD (source|apt)" >&2; exit 2 ;;
+    esac
+fi
 
 if [[ "$CLEAN" == "1" ]]; then
     echo "[build] clean: removing $BUILD"
@@ -71,7 +73,11 @@ else
     fi
 fi
 
-echo "[build] target=$TARGET rtabmap=$RTABMAP_BUILD"
+if [[ "$TARGET" == "jetson-native" ]]; then
+    echo "[build] target=$TARGET rtabmap=$RTABMAP_BUILD"
+else
+    echo "[build] target=$TARGET"
+fi
 
 # ── 2. Per-target build ─────────────────────────────────────────────────────
 case "$TARGET" in
@@ -81,7 +87,6 @@ case "$TARGET" in
             exit 1
         fi
         DOCKER_BUILD_FLAGS=(--network=host --pull=false)
-        [[ "${RBNX_DOCKER_PULL:-}" == "1" ]] && DOCKER_BUILD_FLAGS=(--network=host --pull=true)
         [[ "$CLEAN" == "1" ]] && DOCKER_BUILD_FLAGS+=(--no-cache)
         if [[ "$TARGET" == "jetson-docker" ]]; then
             DF=docker/Dockerfile.jetson
@@ -90,10 +95,7 @@ case "$TARGET" in
             robonix_ensure_local_base_image "$ROS_BASE_IMAGE" "$UPSTREAM_ROS_BASE_IMAGE"
             DOCKER_BUILD_FLAGS+=(--build-arg "ROS_BASE_IMAGE=${ROS_BASE_IMAGE}")
             case "$VARIANT" in
-                light)
-                    DF=docker/Dockerfile
-                    DOCKER_BUILD_FLAGS+=(--target "rtabmap-${RTABMAP_BUILD}")
-                    ;;
+                light)         DF=docker/Dockerfile ;;
                 fastlio2_full) DF=docker/Dockerfile.fastlio2_full ;;
                 *) echo "[build] unknown RBNX_BUILD_VARIANT: $VARIANT (light|fastlio2_full)" >&2; exit 2 ;;
             esac
@@ -101,16 +103,8 @@ case "$TARGET" in
         if [[ "$CLEAN" != "1" ]] && docker image inspect "$IMG" >/dev/null 2>&1; then
             echo "[build] image $IMG present; rebuilding incrementally"
         fi
-        # Only x86 light+apt can skip submodules: it uses stock RTAB-Map and
-        # no FASTLIO2 sources. Source, Jetson docker, and fastlio2_full need
-        # at least one vendored workspace in the Docker context.
-        if [[ -f .gitmodules && ( "$TARGET" != "x86-docker" || "$VARIANT" != "light" || "$RTABMAP_BUILD" != "apt" ) ]]; then
-            echo "[build] syncing git submodules for docker build context"
-            git submodule sync --recursive
-            git submodule update --init --recursive
-        fi
         echo "[build] docker build -f $DF -t $IMG"
-        docker build "${DOCKER_BUILD_FLAGS[@]}" -f "$DF" -t "$IMG" .
+        docker build "${DOCKER_BUILD_FLAGS[@]}" -f "$DF" -t "$IMG" docker/
         ;;
 
     jetson-native)

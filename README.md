@@ -67,36 +67,19 @@ One package, three targets (selected by the deploy `manifest:` field — see
 Add a target by adding a `package_manifest.<target>.yaml` plus a case branch
 in `scripts/build.sh` — the rest of the package is unchanged.
 
-## RTAB-Map build source
+## Jetson native RTAB-Map source
 
-`RBNX_RTABMAP_BUILD` selects where the `rtabmap` ROS packages come from:
+For `package_manifest.jetson-native.yaml`, `RBNX_RTABMAP_BUILD` selects where
+the `rtabmap` ROS packages come from:
 
 | value | behavior |
 |---|---|
 | `source` *(default)* | build vendored `third_party/rtabmap` + `third_party/rtabmap_ros`; includes Robonix zero-copy subscriber patches |
 | `apt` | install/use `ros-humble-rtabmap-ros`; faster baseline build without Robonix zero-copy rtabmap patches |
 
-For Docker:
-
-```bash
-RBNX_RTABMAP_BUILD=apt rbnx build -f robonix_manifest.yaml
-```
-
-`RBNX_RTABMAP_BUILD` is a build-time selector. Docker images set the matching
-runtime `ROBONIX_MAPPING_RTABMAP_BUILD` internally so the launch file knows
-whether zero-copy RTAB-Map parameters are supported. For manual Docker builds,
-use the repository root as the build context:
-
-```bash
-docker build -f docker/Dockerfile --target rtabmap-source -t robonix-mapping .
-```
-
-Set `RBNX_DOCKER_PULL=1` when you want Docker to refresh base-image metadata
-during the package build.
-
-For native Jetson, `apt` expects `ros-humble-rtabmap-ros` to already be
-installed on the host. The `apt` path defaults `ROBONIX_MAPPING_*_ZC=0` so the
-launch does not pass zero-copy-only subscriptions to the stock packages.
+The `apt` path expects `ros-humble-rtabmap-ros` to already be installed on the
+host. It defaults `ROBONIX_MAPPING_*_ZC=0` so the launch does not pass
+zero-copy-only subscriptions to the stock packages.
 
 ## Saving & re-using a map
 
