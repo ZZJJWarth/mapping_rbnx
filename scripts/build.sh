@@ -27,13 +27,7 @@ BUILD="rbnx-build"
 CLEAN="${RBNX_BUILD_CLEAN:-}"
 VARIANT="${RBNX_BUILD_VARIANT:-light}"
 IMG="${ROBONIX_MAPPING_IMAGE:-robonix-mapping}"
-if [[ -n "${RBNX_BUILD_TARGET:-}" ]]; then
-    TARGET="$RBNX_BUILD_TARGET"
-elif [[ "$(uname -m)" == "aarch64" ]]; then
-    TARGET="jetson-native"
-else
-    TARGET="x86-docker"
-fi
+TARGET="${RBNX_BUILD_TARGET:-x86-docker}"
 ROS_BASE_IMAGE="${ROBONIX_MAPPING_ROS_BASE_IMAGE:-robonix-ros:humble-ros-base}"
 UPSTREAM_ROS_BASE_IMAGE="ros:humble-ros-base"
 JETSON_ROS_BASE_IMAGE="${ROBONIX_MAPPING_JETSON_ROS_BASE_IMAGE:-dustynv/ros:humble-ros-base-l4t-r36.4.0}"
@@ -62,15 +56,8 @@ if command -v rbnx >/dev/null 2>&1; then
     echo "[build] rbnx codegen ${FLAGS[*]}"
     rbnx codegen -p "$PKG" "${FLAGS[@]}"
 else
-    if [[ -f "$BUILD/codegen/proto_gen/map_pb2.py" \
-       && -f "$BUILD/codegen/proto_gen/robonix_contracts_pb2_grpc.py" \
-       && -f "$BUILD/codegen/robonix_mcp_types/map_mcp.py" ]]; then
-        echo "[build] WARNING: rbnx not in PATH — reusing existing codegen output"
-    else
-        echo "[build] ERROR: rbnx not in PATH and codegen output is missing" >&2
-        echo "[build]   install robonix-cli + run \`rbnx setup\` once from the robonix source root" >&2
-        exit 1
-    fi
+    echo "[build] WARNING: rbnx not in PATH — skipping proto codegen"
+    echo "[build]   install robonix-cli + run \`rbnx setup\` once from the robonix source root"
 fi
 
 if [[ "$TARGET" == "jetson-native" ]]; then

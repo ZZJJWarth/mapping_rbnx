@@ -17,10 +17,6 @@
 set -eo pipefail
 
 ALGO="${MAPPING_ALGO:-rtabmap}"
-case "$ALGO" in
-    rtabmap|dlio|fastlio2) ;;
-    *) echo "[start_engine] ERR: invalid MAPPING_ALGO=$ALGO" >&2; exit 2 ;;
-esac
 RESOLVED="/tmp/${ALGO}_resolved.yaml"
 
 source /opt/ros/humble/setup.bash

@@ -13,7 +13,7 @@
 #                       (MAPPING_LAUNCH_DIR points at the package's launch/).
 #
 # SIGTERM tears down both children.
-set -euo pipefail
+set -eo pipefail
 
 PKG="${RBNX_PACKAGE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$PKG"
@@ -64,10 +64,8 @@ fi
 
 # ── PYTHONPATH: pkg src + codegen stubs + robonix-api ──────────────────
 CODEGEN="$PKG/rbnx-build/codegen"
-if [[ ! -f "$CODEGEN/proto_gen/map_pb2.py" \
-   || ! -f "$CODEGEN/proto_gen/robonix_contracts_pb2_grpc.py" \
-   || ! -f "$CODEGEN/robonix_mcp_types/map_mcp.py" ]]; then
-    echo "[mapping-native] ERR: map codegen output missing — run \`rbnx codegen -p $PKG --mcp\` first" >&2
+if [[ ! -d "$CODEGEN/proto_gen" ]]; then
+    echo "[mapping-native] ERR: $CODEGEN/proto_gen missing — run \`rbnx codegen -p $PKG\` first" >&2
     exit 2
 fi
 export PYTHONPATH="$PKG/src:$CODEGEN/proto_gen:$CODEGEN/robonix_mcp_types:${PYTHONPATH:-}"
@@ -108,10 +106,7 @@ trap cleanup EXIT INT TERM
 # Without this, start_native.sh bypasses the bridge-write gate, runs engine
 # on a stale resolved.yaml from a previous run, fails fast, and trap kills
 # the bridge BEFORE rbnx delivers CMD_INIT — Cancelling all calls error.
-rm -f /tmp/mapping_algo \
-    /tmp/rtabmap_resolved.yaml \
-    /tmp/dlio_resolved.yaml \
-    /tmp/fastlio2_resolved.yaml
+rm -f /tmp/mapping_algo /tmp/*_resolved.yaml
 
 # ── 1. atlas_bridge (the cap) ──────────────────────────────────────────
 "$PYBIN" -u -m mapping_rbnx.atlas_bridge 2>&1 | sed 's/^/[bridge] /' &
@@ -123,10 +118,6 @@ for _ in $(seq 1 60); do
     sleep 0.5
 done
 ALGO="$(cat /tmp/mapping_algo 2>/dev/null || echo rtabmap)"
-case "$ALGO" in
-    rtabmap|dlio|fastlio2) ;;
-    *) echo "[mapping-native] ERR: invalid mapping algo from bridge: $ALGO" >&2; exit 2 ;;
-esac
 export MAPPING_ALGO="$ALGO"
 for _ in $(seq 1 60); do
     [ -f "/tmp/${ALGO}_resolved.yaml" ] && break

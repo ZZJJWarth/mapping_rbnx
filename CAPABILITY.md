@@ -25,7 +25,6 @@ which engine runs — they only bind the `robonix/service/map/*` contracts.
 | `robonix/service/map/list_maps` | grpc + mcp | `→ ok, detail, maps_json` | list saved map metadata by map id; artifacts remain opaque |
 | `robonix/service/map/load_map` | grpc + mcp | `map_id, mode, [x,y,theta] → ok` | switch onto a saved map (localization / mapping) |
 | `robonix/service/map/pose_estimate` | grpc + mcp | `x, y, theta → ok` | seed a pose so localization re-converges |
-| `robonix/service/map/switch_mode` | grpc + mcp | `mode → ok` | switch the running SLAM session between mapping and localization |
 
 Every `algo` backs this **same** surface (an adapter node is spawned when an
 engine can't natively publish a contract), so `scene` / `nav` are
@@ -96,9 +95,9 @@ sensors: { lidar3d: true, rgb: true, depth: true, odom: true, imu: true }  # Mid
 `sensors:` is required and must list at least one sensor — the package
 refuses to guess.
 
-## Map operations (`save_map` / `load_map` / `pose_estimate` / `switch_mode`)
+## Map operations (`save_map` / `load_map` / `pose_estimate`)
 
-Runtime RPC+MCP controls for managing maps without re-deploying. These are
+Runtime RPC+MCP controls for managing maps without re-deploying. All three are
 callable any time after init, by gRPC (scene / programmatic) or MCP (pilot /
 LLM). Maps live under `{MAPPING_MAPS_DIR}/<map_id>/` (rtabmap.db + occupancy
 pgm/png + cloud pcd + meta), one directory per `map_id` — the same id scene
@@ -119,8 +118,6 @@ keys its semantic objects to.
   (map frame) to `/initialpose` so rtabmap's localization re-converges — global
   relocalization, kidnapped-robot recovery, or refining a rough operator guess.
   rtabmap snaps the guess to the true pose via scan matching.
-- **switch_mode** `(mode)` → `(ok, detail)`. Flip the live rtabmap session
-  between `mapping` and `localization` without loading a different map.
 
 ## Map persistence (`map_id`)
 
