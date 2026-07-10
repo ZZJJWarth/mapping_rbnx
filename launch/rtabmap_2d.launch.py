@@ -119,7 +119,7 @@ def _make_nodes(context, *args, **kwargs):
     have_rgb = bool(rgb_topic) and rgb_topic != _NONE
     have_depth = bool(depth_topic) and depth_topic != _NONE
     have_rgbd = have_rgb and have_depth
-    rtabmap_build = os.environ.get("ROBONIX_MAPPING_RTABMAP_BUILD", "source").lower()
+    rtabmap_build = os.environ.get("ROBONIX_MAPPING_RTABMAP_BUILD", "apt").lower()
     zc_supported = rtabmap_build != "apt"
     use_rgb_zc = (
         zc_supported and have_rgbd

@@ -20,7 +20,9 @@ ALGO="${MAPPING_ALGO:-rtabmap}"
 RESOLVED="/tmp/${ALGO}_resolved.yaml"
 
 source /opt/ros/humble/setup.bash
-if [[ -n "${ROBONIX_PKG_HOST_DIR:-}" && -f "$ROBONIX_PKG_HOST_DIR/rbnx-build/native_ws/install/setup.bash" ]]; then
+if [[ "${ROBONIX_MAPPING_RTABMAP_BUILD:-}" == "source" \
+   && -n "${ROBONIX_PKG_HOST_DIR:-}" \
+   && -f "$ROBONIX_PKG_HOST_DIR/rbnx-build/native_ws/install/setup.bash" ]]; then
     source "$ROBONIX_PKG_HOST_DIR/rbnx-build/native_ws/install/setup.bash"
 fi
 
